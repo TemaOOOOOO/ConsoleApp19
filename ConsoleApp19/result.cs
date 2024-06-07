@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using Telegram.Bot.Types.InlineQueryResults;
+using Telegram.Bots.Types;
 
 namespace ConsoleApp19
 {
@@ -26,8 +27,8 @@ namespace ConsoleApp19
         public Artists artists { get; set; }
         public CoverArt coverArt { get; set; }
         public Date date { get; set; }
-        public object profile { get; set; }
-        public object visuals { get; set; }
+        public Profile profile { get; set; }
+        public Visuals visuals { get; set; }
         public object duration { get; set; }
         public object releaseDate { get; set; }
         public object podcast { get; set; }
@@ -87,12 +88,36 @@ namespace ConsoleApp19
             return result;
         }
     }
+    public class Visuals
+    {
+        public AvatarImage avatarImage { get; set; }
+    }
+    public class AvatarImage
+    {
+        public List<Source> sources { get; set; }
+    }
 
     public class Source
     {
-        public string url { get; set; }
+        public string? url { get; set; }
         public int width { get; set; }
         public int height { get; set; }
+    }
+
+    public class Response
+    {
+        public string name { get; set; }
+        public string image { get; set; }
+        public string uri { get; set; }
+
+        public override string ToString()
+        {
+            string str = string.Empty;
+            str += image + "\n";
+            str += "Name: " + name + "\n";
+            str += uri;
+            return str;
+        }
     }
 
 

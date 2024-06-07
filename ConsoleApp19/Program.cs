@@ -12,6 +12,8 @@ using Telegram.Bot.Polling;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
 using Telegram.Bot.Types.ReplyMarkups;
+using System.Net;
+using System.Reflection;
 
 class Program
 {
@@ -51,7 +53,9 @@ class Program
         Console.WriteLine("Press any key to exit");
         Console.ReadKey();
 
+        
         cts.Cancel();
+        cts.Dispose();
     }
 
     private static async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, CancellationToken cancellationToken)
@@ -63,14 +67,14 @@ class Program
 
             Console.WriteLine($"Received a text message in chat {chatId}: {messageText}");
 
-            if (messageText.StartsWith("/search"))
+            if (messageText.StartsWith("/album"))
             {
                 var parts = messageText.Split(' ', 2);
 
                 if (parts.Length == 2)
                 {
                     var singer = parts[1];
-                    var response = await GetAlbumsOfSinger(singer);
+                    var response = await GetAlbums(singer);
 
                     await botClient.SendTextMessageAsync(
                         chatId: chatId,
@@ -89,18 +93,29 @@ class Program
             }
            
 
-            if (messageText.StartsWith("/albums"))
+            if (messageText.StartsWith("/artist"))
             {
                 var parts = messageText.Split(' ', 2);
 
                 if (parts.Length == 2)
                 {
-                    var albums = parts[1];
-                    var response = await GetAlbum(albums);
+                    var artist = parts[1];
+                    var response = await GetArtist(artist);
 
+                    string str = string.Empty;
+                    try
+                    {
+                        str += response.visuals.avatarImage.sources[0].url + "\n";
+                    }
+                    catch (Exception ex)
+                    {
+                        str += "Image failed to load";
+                    }
+                    str += "Name: " + response.profile.name + "\n";
+                    str += response.uri;
                     await botClient.SendTextMessageAsync(
                         chatId: chatId,
-                        text: response,
+                        text: str,
                         cancellationToken: cancellationToken
                     );
                 }
@@ -117,12 +132,12 @@ class Program
 
             if (messageText.StartsWith("/add"))
             {
-                var parts = messageText.Split(' ', 3);
+                var parts = messageText.Split(' ', 2);
 
-                if (parts.Length == 3 && int.TryParse(parts[1], out int id))
+                if (parts.Length == 2)
                 {
-                    var request = parts[2];
-                    var response = await AddHistoryToDatabase(id, request);
+                    string request = parts[1];
+                    string response = await AddHistoryToDatabase(request);
 
                     await botClient.SendTextMessageAsync(
                         chatId: chatId,
@@ -139,15 +154,27 @@ class Program
                     );
                 }
             }
-            
+            if (messageText.StartsWith("/favorites"))
+            {
+                var artists = GetHistory().Result;
+                foreach (Response artist in artists)
+                {
+                    await botClient.SendTextMessageAsync(
+                        chatId: chatId,
+                        text: artist.ToString(),
+                        cancellationToken: cancellationToken
+                    );
+                }
+            }
+
 
             if (messageText.StartsWith("/delete"))
             {
                 var parts = messageText.Split(' ', 2);
 
-                if (parts.Length == 2 && int.TryParse(parts[1], out int id))
+                if (parts.Length == 2)
                 {
-                    var response = await DeleteHistoryFromDatabase(id);
+                    var response = await DeleteHistoryFromDatabase(parts[1]);
 
                     await botClient.SendTextMessageAsync(
                         chatId: chatId,
@@ -169,7 +196,7 @@ class Program
         }
     }
 
-    private static async Task<string> GetAlbumsOfSinger(string singer)
+    private static async Task<string> GetAlbums(string singer)
     {
         try
         {
@@ -177,7 +204,7 @@ class Program
             var request = new HttpRequestMessage
             {
                 Method = HttpMethod.Get,
-                RequestUri = new Uri($"https://localhost:7284/Spoti/AlbumsOfSinger?singer={singer}"),
+                RequestUri = new Uri($"https://localhost:7284/Spoti/SearchAlbums?singer={singer}"),
             };
             using (var response = await client.SendAsync(request))
             {
@@ -200,50 +227,36 @@ class Program
         }
     }
 
-    private static async Task<string> GetAlbum(string album)
+    private static async Task<Data> GetArtist(string album)
+    {
+        var client = new HttpClient();
+        var request = new HttpRequestMessage
+        {
+            Method = HttpMethod.Get,
+            RequestUri = new Uri($"https://localhost:7284/Spoti/SearchArtists?artist={album}"),
+        };
+        using (var response = await client.SendAsync(request))
+        {
+            response.EnsureSuccessStatusCode();
+            var body = await response.Content.ReadAsStringAsync();
+
+            Result result = JsonConvert.DeserializeObject<Result>(body);
+
+            return result.items[0].data;
+        }
+    }
+
+    private static async Task<string> AddHistoryToDatabase(string name)
     {
         try
         {
             var client = new HttpClient();
             var request = new HttpRequestMessage
             {
-                Method = HttpMethod.Get,
-                RequestUri = new Uri($"https://localhost:7284/Spoti/AlbumByName?album={album}"),
+                Method = HttpMethod.Put,
+                RequestUri = new Uri($"https://localhost:7284/databasePut?name={name}"),
             };
-            using (var response = await client.SendAsync(request))
-            {
-                response.EnsureSuccessStatusCode();
-                var body = await response.Content.ReadAsStringAsync();
-
-                Result result = JsonConvert.DeserializeObject<Result>(body);
-
-                if (result == null || result.totalCount == 0)
-                {
-                    return $"No albums found {album}.";
-                }
-
-                return $"Albums of {album}:\n- " + string.Join("\n- ", result.ToString());
-            }
-        }
-        catch (Exception ex)
-        {
-            return $"Error retrieving albums: {ex.Message}";
-        }
-    }
-
-    private static async Task<string> AddHistoryToDatabase(int id, string request)
-    {
-        try
-        {
-            var client = new HttpClient();
-            var content = new StringContent(
-                JsonConvert.SerializeObject(new { Id = id, Request = request }),
-                Encoding.UTF8,
-                "application/json"
-            );
-
-            var response = await client.PutAsync($"https://localhost:7284/databasePut?id={id}&request={request}", null);
-            response.EnsureSuccessStatusCode();
+            client.SendAsync(request);
 
             return "History added successfully.";
         }
@@ -253,12 +266,12 @@ class Program
         }
     }
 
-    private static async Task<string> DeleteHistoryFromDatabase(int id)
+    private static async Task<string> DeleteHistoryFromDatabase(string name)
     {
         try
         {
             var client = new HttpClient();
-            var response = await client.DeleteAsync($"https://localhost:7284/databaseDel?id={id}");
+            var response = await client.DeleteAsync($"https://localhost:7284/databaseDel?name={name}");
             response.EnsureSuccessStatusCode();
 
             return "History deleted successfully.";
@@ -267,6 +280,14 @@ class Program
         {
             return $"Error deleting history: {ex.Message}";
         }
+    }
+
+    private static async Task<List<Response>> GetHistory()
+    {   
+        var client = new HttpClient();
+        var response = await client.GetAsync($"https://localhost:7284/Spoti/database");
+        response.EnsureSuccessStatusCode();
+        return JsonConvert.DeserializeObject<List<Response>>(response.Content.ReadAsStringAsync().Result);
     }
 
 
